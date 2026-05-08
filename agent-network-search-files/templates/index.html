@@ -1,0 +1,883 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Agent Network Search</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<style>
+  :root {
+    --bg:       #080c10;
+    --surface:  #0d1520;
+    --panel:    #111c2a;
+    --border:   #1e3448;
+    --accent:   #00d4ff;
+    --accent2:  #ff6b35;
+    --accent3:  #7fff6b;
+    --text:     #c8dde8;
+    --muted:    #4a6478;
+    --danger:   #ff4455;
+    --success:  #00ff99;
+    --font-mono: 'Space Mono', monospace;
+    --font-display: 'Syne', sans-serif;
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-mono);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Grid noise overlay */
+  body::before {
+    content:'';
+    position:fixed; inset:0; pointer-events:none; z-index:0;
+    background-image:
+      linear-gradient(rgba(0,212,255,.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,212,255,.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+  }
+
+  /* ── Header ── */
+  header {
+    position: relative; z-index: 10;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 18px 32px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(13,21,32,.95);
+    backdrop-filter: blur(12px);
+  }
+  .logo {
+    display: flex; align-items: center; gap: 12px;
+  }
+  .logo-icon {
+    width: 36px; height: 36px;
+    border: 2px solid var(--accent);
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    position: relative; overflow: hidden;
+  }
+  .logo-icon::before {
+    content:'';
+    position:absolute; inset:0;
+    background: linear-gradient(135deg, rgba(0,212,255,.3), transparent);
+  }
+  .logo-icon svg { width:20px; height:20px; }
+  .logo-title {
+    font-family: var(--font-display);
+    font-weight: 800;
+    font-size: 1.1rem;
+    letter-spacing: -0.02em;
+    color: #fff;
+  }
+  .logo-title span { color: var(--accent); }
+  .header-meta {
+    font-size: .7rem;
+    color: var(--muted);
+    letter-spacing: .1em;
+    text-transform: uppercase;
+  }
+  .status-badge {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 14px;
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    font-size: .72rem;
+    color: var(--muted);
+    transition: all .3s;
+  }
+  .status-dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--muted);
+    transition: all .3s;
+  }
+  .status-badge.running { border-color: var(--accent); color: var(--accent); }
+  .status-badge.running .status-dot {
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--accent);
+    animation: pulse 1s infinite;
+  }
+  .status-badge.done { border-color: var(--success); color: var(--success); }
+  .status-badge.done .status-dot { background: var(--success); box-shadow: 0 0 8px var(--success); }
+  @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:.4;} }
+
+  /* ── Layout ── */
+  .app-layout {
+    display: grid;
+    grid-template-columns: 300px 1fr 280px;
+    grid-template-rows: calc(100vh - 65px);
+    position: relative; z-index: 1;
+  }
+
+  /* ── Sidebar ── */
+  .sidebar {
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column;
+    overflow-y: auto;
+  }
+  .sidebar-section {
+    padding: 20px;
+    border-bottom: 1px solid var(--border);
+  }
+  .section-label {
+    font-size: .65rem;
+    letter-spacing: .15em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 14px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .section-label::after {
+    content:''; flex:1; height:1px; background: var(--border);
+  }
+
+  .field { margin-bottom: 14px; }
+  .field label {
+    display: block;
+    font-size: .68rem;
+    color: var(--muted);
+    margin-bottom: 6px;
+    letter-spacing: .08em;
+  }
+  select, input[type=range], input[type=number] {
+    width: 100%;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: .8rem;
+    padding: 8px 10px;
+    border-radius: 6px;
+    outline: none;
+    transition: border-color .2s;
+    -webkit-appearance: none;
+    appearance: none;
+  }
+  select:focus, input:focus { border-color: var(--accent); }
+  select option { background: var(--panel); }
+
+  input[type=range] {
+    padding: 0; height: 4px;
+    background: var(--border);
+    cursor: pointer;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 6px var(--accent);
+    cursor: pointer;
+  }
+  .range-val {
+    text-align: right;
+    font-size: .8rem;
+    color: var(--accent);
+    margin-top: 4px;
+  }
+
+  .algo-grid {
+    display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px;
+  }
+  .algo-btn {
+    padding: 8px 4px;
+    border: 1px solid var(--border);
+    background: var(--panel);
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: .68rem;
+    border-radius: 6px;
+    cursor: pointer;
+    text-align: center;
+    transition: all .2s;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+  }
+  .algo-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .algo-btn.active {
+    border-color: var(--accent);
+    background: rgba(0,212,255,.12);
+    color: var(--accent);
+  }
+
+  .btn-run {
+    width: 100%;
+    padding: 13px;
+    border: 1px solid var(--accent);
+    background: rgba(0,212,255,.1);
+    color: var(--accent);
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: .95rem;
+    letter-spacing: .05em;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all .2s;
+    text-transform: uppercase;
+    position: relative; overflow: hidden;
+  }
+  .btn-run::before {
+    content:'';
+    position:absolute; inset:0;
+    background: linear-gradient(90deg, transparent, rgba(0,212,255,.15), transparent);
+    transform: translateX(-100%);
+    transition: transform .4s;
+  }
+  .btn-run:hover { background: rgba(0,212,255,.2); box-shadow: 0 0 20px rgba(0,212,255,.2); }
+  .btn-run:hover::before { transform: translateX(100%); }
+  .btn-run:disabled { opacity: .4; cursor: not-allowed; border-color: var(--muted); color: var(--muted); }
+  .btn-run:disabled::before { display:none; }
+
+  .btn-reset {
+    width: 100%; margin-top: 8px;
+    padding: 10px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: .75rem;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all .2s;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+  }
+  .btn-reset:hover { border-color: var(--danger); color: var(--danger); }
+
+  /* Agent legend */
+  .agent-legend { display: flex; flex-direction: column; gap: 8px; }
+  .agent-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--panel);
+    transition: all .3s;
+  }
+  .agent-item.active-agent { border-color: var(--accent); background: rgba(0,212,255,.05); }
+  .agent-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .agent-info { flex: 1; min-width: 0; }
+  .agent-name { font-size: .72rem; color: var(--text); }
+  .agent-stat { font-size: .65rem; color: var(--muted); margin-top: 2px; }
+  .agent-bar-wrap { height: 3px; background: var(--border); border-radius: 2px; margin-top: 5px; }
+  .agent-bar { height: 100%; border-radius: 2px; width: 0; transition: width .4s; }
+
+  /* ── Canvas area ── */
+  .canvas-area {
+    position: relative;
+    background: var(--bg);
+    overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+  .canvas-toolbar {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(13,21,32,.8);
+    flex-shrink: 0;
+  }
+  .toolbar-label {
+    font-size: .68rem; color: var(--muted);
+    text-transform: uppercase; letter-spacing: .1em;
+  }
+  .toolbar-val { font-size: .8rem; color: var(--text); }
+  .toolbar-sep { width: 1px; height: 16px; background: var(--border); }
+
+  #graph-svg {
+    flex: 1;
+    width: 100%; height: 100%;
+  }
+
+  /* Search path overlay */
+  .found-banner {
+    position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+    padding: 12px 28px;
+    background: rgba(0,255,153,.1);
+    border: 1px solid var(--success);
+    border-radius: 30px;
+    color: var(--success);
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: .9rem;
+    letter-spacing: .05em;
+    display: none;
+    animation: slideUp .4s ease;
+    white-space: nowrap;
+  }
+  @keyframes slideUp { from{opacity:0;transform:translate(-50%,20px)} to{opacity:1;transform:translate(-50%,0)} }
+
+  /* ── Right panel ── */
+  .right-panel {
+    background: var(--surface);
+    border-left: 1px solid var(--border);
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  .log-header {
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--border);
+    font-size: .68rem;
+    color: var(--muted);
+    letter-spacing: .15em;
+    text-transform: uppercase;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .log-count {
+    background: var(--panel);
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: .65rem;
+    color: var(--accent);
+  }
+  .log-scroll {
+    flex: 1;
+    overflow-y: auto;
+    padding: 10px;
+  }
+  .log-scroll::-webkit-scrollbar { width: 4px; }
+  .log-scroll::-webkit-scrollbar-track { background: transparent; }
+  .log-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .log-entry {
+    display: flex; gap: 8px;
+    padding: 6px 8px;
+    border-radius: 5px;
+    margin-bottom: 3px;
+    font-size: .68rem;
+    line-height: 1.5;
+    animation: fadeIn .2s ease;
+    border-left: 2px solid transparent;
+  }
+  @keyframes fadeIn { from{opacity:0;transform:translateX(6px)} to{opacity:1;transform:none} }
+  .log-entry.visited { border-left-color: var(--accent); background: rgba(0,212,255,.04); }
+  .log-entry.gossip { border-left-color: var(--accent2); background: rgba(255,107,53,.04); }
+  .log-entry.found { border-left-color: var(--success); background: rgba(0,255,153,.06); }
+  .log-entry.heartbeat { border-left-color: var(--muted); }
+  .log-entry.done { border-left-color: var(--success); background: rgba(0,255,153,.08); }
+  .log-time { color: var(--muted); flex-shrink: 0; }
+  .log-tag {
+    padding: 1px 5px; border-radius: 3px;
+    font-size: .6rem; font-weight: 700;
+    text-transform: uppercase; flex-shrink: 0;
+  }
+  .tag-visited { background: rgba(0,212,255,.15); color: var(--accent); }
+  .tag-gossip  { background: rgba(255,107,53,.15); color: var(--accent2); }
+  .tag-found   { background: rgba(0,255,153,.15); color: var(--success); }
+  .tag-heart   { background: rgba(74,100,120,.15); color: var(--muted); }
+  .tag-assign  { background: rgba(127,255,107,.15); color: var(--accent3); }
+  .tag-done    { background: rgba(0,255,153,.2); color: var(--success); }
+
+  /* Stats panel */
+  .stats-panel {
+    border-top: 1px solid var(--border);
+    padding: 14px 18px;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+  }
+  .stat-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+  }
+  .stat-label { font-size: .6rem; color: var(--muted); text-transform: uppercase; letter-spacing: .1em; }
+  .stat-value { font-size: 1.2rem; color: var(--accent); font-family: var(--font-display); font-weight: 700; margin-top: 3px; }
+  .stat-value.success-val { color: var(--success); }
+
+  /* D3 styles */
+  .node circle {
+    stroke-width: 1.5;
+    cursor: pointer;
+    transition: r .2s;
+  }
+  .node circle:hover { r: 8; }
+  .link { stroke-opacity: .25; }
+  .node text {
+    font-family: var(--font-mono);
+    font-size: 8px;
+    fill: var(--muted);
+    pointer-events: none;
+    user-select: none;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#00d4ff" stroke-width="2">
+        <circle cx="12" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/>
+        <line x1="12" y1="7" x2="5" y2="17"/><line x1="12" y1="7" x2="19" y2="17"/>
+        <line x1="7" y1="19" x2="17" y2="19"/>
+      </svg>
+    </div>
+    <div>
+      <div class="logo-title">Agent<span>Net</span> Search</div>
+      <div class="header-meta">Distributed Network Traversal System</div>
+    </div>
+  </div>
+  <div id="status-badge" class="status-badge">
+    <div class="status-dot"></div>
+    <span id="status-text">IDLE</span>
+  </div>
+</header>
+
+<div class="app-layout">
+
+  <!-- LEFT SIDEBAR -->
+  <aside class="sidebar">
+    <div class="sidebar-section">
+      <div class="section-label">Graph Config</div>
+      <div class="field">
+        <label>Network Topology</label>
+        <select id="preset-select">
+          <option value="small">Small — 50 nodes</option>
+          <option value="medium" selected>Medium — 200 nodes</option>
+          <option value="large">Large — 500 nodes</option>
+          <option value="grid">Grid — 10×10</option>
+          <option value="star">Star — 50 nodes</option>
+          <option value="cycle">Cycle — 100 nodes</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Random Seed</label>
+        <input type="number" id="seed-input" value="42" min="1" max="999"/>
+      </div>
+      <div class="field">
+        <label>Target Node (leave blank = last)</label>
+        <input type="number" id="target-input" placeholder="auto"/>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="section-label">Agent Config</div>
+      <div class="field">
+        <label>Number of Agents</label>
+        <input type="range" id="agents-range" min="1" max="6" value="3"/>
+        <div class="range-val"><span id="agents-val">3</span> agents</div>
+      </div>
+      <div class="field">
+        <label>Search Algorithm</label>
+        <div class="algo-grid">
+          <button class="algo-btn active" data-algo="bfs">BFS</button>
+          <button class="algo-btn" data-algo="astar">A*</button>
+          <button class="algo-btn" data-algo="random">Random</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <button class="btn-run" id="run-btn">▶ Launch Search</button>
+      <button class="btn-reset" id="reset-btn">↺ Reset</button>
+    </div>
+
+    <div class="sidebar-section" style="flex:1">
+      <div class="section-label">Active Agents</div>
+      <div class="agent-legend" id="agent-legend"></div>
+    </div>
+  </aside>
+
+  <!-- MAIN CANVAS -->
+  <main class="canvas-area">
+    <div class="canvas-toolbar">
+      <span class="toolbar-label">Nodes</span>
+      <span class="toolbar-val" id="tb-nodes">—</span>
+      <div class="toolbar-sep"></div>
+      <span class="toolbar-label">Edges</span>
+      <span class="toolbar-val" id="tb-edges">—</span>
+      <div class="toolbar-sep"></div>
+      <span class="toolbar-label">Visited</span>
+      <span class="toolbar-val" id="tb-visited">0</span>
+      <div class="toolbar-sep"></div>
+      <span class="toolbar-label">Frontier</span>
+      <span class="toolbar-val" id="tb-frontier">0</span>
+      <div class="toolbar-sep"></div>
+      <span class="toolbar-label">Elapsed</span>
+      <span class="toolbar-val" id="tb-elapsed">0 ms</span>
+    </div>
+    <svg id="graph-svg"></svg>
+    <div class="found-banner" id="found-banner">✓ Target Found!</div>
+  </main>
+
+  <!-- RIGHT LOG -->
+  <aside class="right-panel">
+    <div class="log-header">
+      Event Log
+      <span class="log-count" id="log-count">0</span>
+    </div>
+    <div class="log-scroll" id="log-scroll"></div>
+    <div class="stats-panel">
+      <div class="stat-card">
+        <div class="stat-label">Nodes Visited</div>
+        <div class="stat-value" id="stat-visited">0</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Time (ms)</div>
+        <div class="stat-value" id="stat-time">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Agents Used</div>
+        <div class="stat-value" id="stat-agents">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Status</div>
+        <div class="stat-value success-val" id="stat-status">—</div>
+      </div>
+    </div>
+  </aside>
+
+</div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────────
+const AGENT_COLORS = ['#00d4ff','#ff6b35','#7fff6b','#c97bff','#ffd700','#ff4d94'];
+let ws = null;
+let sessionId = crypto.randomUUID();
+let graphData = null;
+let simulation = null;
+let svg = null, gLinks = null, gNodes = null;
+let nodeMap = {};
+let visitedCount = 0;
+let logCount = 0;
+let searchRunning = false;
+let startTime = null;
+let timerInterval = null;
+let selectedAlgo = 'bfs';
+
+// ── D3 Graph ───────────────────────────────────────────────────────────────────
+function initSVG() {
+  const container = document.querySelector('.canvas-area');
+  const w = container.clientWidth;
+  const h = container.clientHeight - 42;
+
+  d3.select('#graph-svg').selectAll('*').remove();
+  svg = d3.select('#graph-svg')
+    .attr('width', w).attr('height', h);
+
+  // Arrow defs
+  const defs = svg.append('defs');
+  defs.append('marker')
+    .attr('id','arrow').attr('viewBox','0 -5 10 10')
+    .attr('refX',18).attr('refY',0)
+    .attr('markerWidth',4).attr('markerHeight',4)
+    .attr('orient','auto')
+    .append('path').attr('d','M0,-5L10,0L0,5').attr('fill','#1e3448');
+
+  // Glow filter
+  const filter = defs.append('filter').attr('id','glow');
+  filter.append('feGaussianBlur').attr('stdDeviation','3').attr('result','coloredBlur');
+  const merge = filter.append('feMerge');
+  merge.append('feMergeNode').attr('in','coloredBlur');
+  merge.append('feMergeNode').attr('in','SourceGraphic');
+
+  const zoom = d3.zoom().scaleExtent([.1,4]).on('zoom', e => {
+    gAll.attr('transform', e.transform);
+  });
+  svg.call(zoom);
+
+  const gAll = svg.append('g');
+  gLinks = gAll.append('g').attr('class','links');
+  gNodes = gAll.append('g').attr('class','nodes');
+
+  return { w, h, gAll };
+}
+
+async function loadGraph(preset, seed) {
+  const res = await fetch(`/api/graph/${preset}?seed=${seed}`);
+  graphData = await res.json();
+  document.getElementById('tb-nodes').textContent = graphData.node_count;
+  document.getElementById('tb-edges').textContent = graphData.edge_count;
+  renderGraph(graphData);
+}
+
+function renderGraph(data) {
+  const { w, h } = initSVG();
+  nodeMap = {};
+
+  const nodes = data.nodes.map(n => ({ ...n, x: w/2 + (Math.random()-.5)*200, y: h/2 + (Math.random()-.5)*200 }));
+  const links = data.edges.map(e => ({ source: e.source, target: e.target }));
+
+  nodes.forEach(n => nodeMap[n.id] = n);
+
+  const link = gLinks.selectAll('line').data(links).join('line')
+    .attr('class','link')
+    .attr('stroke','#1e3448')
+    .attr('stroke-width', 1);
+
+  const node = gNodes.selectAll('g.node').data(nodes).join('g')
+    .attr('class','node')
+    .call(d3.drag()
+      .on('start', (e,d) => { if(!e.active) simulation.alphaTarget(.3).restart(); d.fx=d.x; d.fy=d.y; })
+      .on('drag',  (e,d) => { d.fx=e.x; d.fy=e.y; })
+      .on('end',   (e,d) => { if(!e.active) simulation.alphaTarget(0); d.fx=null; d.fy=null; })
+    );
+
+  node.append('circle')
+    .attr('r', d => 3 + Math.min(d.degree, 8) * .5)
+    .attr('fill', '#0d1520')
+    .attr('stroke', '#1e3448');
+
+  if (data.node_count <= 100) {
+    node.append('text').attr('dy','.35em').attr('text-anchor','middle')
+      .attr('y', -10).text(d => d.id);
+  }
+
+  simulation = d3.forceSimulation(nodes)
+    .force('link', d3.forceLink(links).id(d=>d.id).distance(40))
+    .force('charge', d3.forceManyBody().strength(-60))
+    .force('center', d3.forceCenter(w/2, h/2))
+    .force('collision', d3.forceCollide(10))
+    .on('tick', () => {
+      link.attr('x1',d=>d.source.x).attr('y1',d=>d.source.y)
+          .attr('x2',d=>d.target.x).attr('y2',d=>d.target.y);
+      node.attr('transform',d=>`translate(${d.x},${d.y})`);
+    });
+}
+
+function paintNode(nodeId, color, isTarget=false, isStart=false) {
+  gNodes.selectAll('g.node')
+    .filter(d => d.id == nodeId)
+    .select('circle')
+    .attr('fill', color)
+    .attr('stroke', isTarget||isStart ? '#fff' : color)
+    .attr('stroke-width', isTarget||isStart ? 2.5 : 1.5)
+    .attr('filter', isTarget ? 'url(#glow)' : null)
+    .attr('r', isTarget ? 10 : isStart ? 8 : null);
+}
+
+// ── Agent Legend ───────────────────────────────────────────────────────────────
+function buildAgentLegend(n) {
+  const el = document.getElementById('agent-legend');
+  el.innerHTML = '';
+  for (let i=0; i<n; i++) {
+    const color = AGENT_COLORS[i % AGENT_COLORS.length];
+    el.innerHTML += `
+      <div class="agent-item" id="agent-item-${i}">
+        <div class="agent-dot" style="background:${color};box-shadow:0 0 6px ${color}"></div>
+        <div class="agent-info">
+          <div class="agent-name">agent-${i}</div>
+          <div class="agent-stat" id="agent-stat-${i}">waiting…</div>
+          <div class="agent-bar-wrap">
+            <div class="agent-bar" id="agent-bar-${i}" style="background:${color}"></div>
+          </div>
+        </div>
+      </div>`;
+  }
+}
+
+function updateAgentStat(agentId, text, progress=0) {
+  const idx = parseInt(agentId.split('-')[1]);
+  const stat = document.getElementById(`agent-stat-${idx}`);
+  const bar  = document.getElementById(`agent-bar-${idx}`);
+  const item = document.getElementById(`agent-item-${idx}`);
+  if (stat) stat.textContent = text;
+  if (bar)  bar.style.width = Math.min(100,progress) + '%';
+  if (item) item.classList.toggle('active-agent', progress > 0);
+}
+
+// ── Log ────────────────────────────────────────────────────────────────────────
+function addLog(type, content, tag) {
+  const scroll = document.getElementById('log-scroll');
+  const t = new Date().toLocaleTimeString('en',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  const entry = document.createElement('div');
+  entry.className = `log-entry ${type}`;
+  entry.innerHTML = `<span class="log-time">${t}</span><span class="log-tag tag-${tag}">${tag}</span><span>${content}</span>`;
+  scroll.appendChild(entry);
+  scroll.scrollTop = scroll.scrollHeight;
+  logCount++;
+  document.getElementById('log-count').textContent = logCount;
+  // Keep max 200 entries
+  if (scroll.children.length > 200) scroll.removeChild(scroll.firstChild);
+}
+
+// ── Timer ──────────────────────────────────────────────────────────────────────
+function startTimer() {
+  startTime = Date.now();
+  timerInterval = setInterval(() => {
+    document.getElementById('tb-elapsed').textContent = (Date.now()-startTime) + ' ms';
+  }, 100);
+}
+function stopTimer() {
+  clearInterval(timerInterval);
+}
+
+// ── WebSocket ──────────────────────────────────────────────────────────────────
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}/ws/${sessionId}`);
+  ws.onopen = () => addLog('heartbeat','WebSocket connected','heart');
+  ws.onclose = () => { addLog('heartbeat','WebSocket disconnected','heart'); searchRunning=false; setIdle(); };
+  ws.onerror = () => addLog('heartbeat','Connection error','heart');
+  ws.onmessage = e => handleEvent(JSON.parse(e.data));
+}
+
+function handleEvent(ev) {
+  const numAgents = parseInt(document.getElementById('agents-range').value);
+
+  switch(ev.event) {
+    case 'search_start':
+      visitedCount = 0;
+      paintNode(ev.start, '#00d4ff', false, true);
+      paintNode(ev.target, '#ffd700', true, false);
+      addLog('visited', `Search started: node ${ev.start} → ${ev.target} | ${ev.num_agents} agents`, 'assign');
+      break;
+
+    case 'ASSIGN_FRONTIER':
+      if (ev.sender_id !== 'coordinator') {
+        updateAgentStat(ev.sender_id, `frontier: ${ev.payload.frontier_size}`, ev.payload.frontier_size);
+      }
+      break;
+
+    case 'NODE_VISITED': {
+      const n = ev.payload.node;
+      const agentIdx = ev.payload.agent_color ?? parseInt(ev.sender_id.split('-')[1]);
+      const color = AGENT_COLORS[agentIdx % AGENT_COLORS.length];
+      paintNode(n, color);
+      visitedCount++;
+      document.getElementById('tb-visited').textContent = visitedCount;
+      document.getElementById('stat-visited').textContent = visitedCount;
+      document.getElementById('tb-frontier').textContent = ev.payload.frontier_size;
+      updateAgentStat(ev.sender_id, `visited ${visitedCount} | frontier ${ev.payload.frontier_size}`,
+        Math.min(100, ev.payload.depth / (graphData?.node_count||200) * 100));
+      if (visitedCount % 5 === 0)
+        addLog('visited', `${ev.sender_id} visited node ${n} (depth ${ev.payload.depth})`, 'visited');
+      break;
+    }
+
+    case 'GOSSIP_STATE':
+      if (ev.payload.nodes_transferred) {
+        addLog('gossip', `Rebalance: ${ev.payload.nodes_transferred} nodes ${ev.payload.from}→${ev.payload.to}`, 'gossip');
+      }
+      break;
+
+    case 'PATH_FOUND':
+      stopTimer();
+      document.getElementById('tb-elapsed').textContent = ev.payload.elapsed_ms + ' ms';
+      document.getElementById('stat-time').textContent = ev.payload.elapsed_ms + ' ms';
+      document.getElementById('stat-agents').textContent = ev.payload.agents_used;
+      addLog('found', `✓ Target found! ${ev.payload.total_nodes_visited} nodes visited in ${ev.payload.elapsed_ms} ms`, 'found');
+      break;
+
+    case 'HEARTBEAT':
+      updateAgentStat(ev.sender_id,
+        `♥ expanded:${ev.payload.nodes_expanded} frontier:${ev.payload.frontier_size}`,
+        Math.min(100, ev.payload.nodes_expanded / (graphData?.node_count||200) * 100));
+      break;
+
+    case 'SEARCH_DONE':
+      stopTimer();
+      searchRunning = false;
+      document.getElementById('stat-status').textContent = ev.payload.success ? 'FOUND' : 'FAILED';
+      setIdle(ev.payload.success);
+      if (ev.payload.success) {
+        const banner = document.getElementById('found-banner');
+        banner.style.display = 'block';
+        setTimeout(() => banner.style.display='none', 3000);
+      }
+      addLog('done', ev.payload.success ? '✓ Search complete' : `✗ ${ev.payload.reason||'Not found'}`, 'done');
+      document.getElementById('run-btn').disabled = false;
+      break;
+  }
+}
+
+function setIdle(success=false) {
+  const badge = document.getElementById('status-badge');
+  const text  = document.getElementById('status-text');
+  badge.className = 'status-badge' + (success ? ' done' : '');
+  text.textContent = success ? 'COMPLETE' : 'IDLE';
+}
+
+function setRunning() {
+  const badge = document.getElementById('status-badge');
+  badge.className = 'status-badge running';
+  document.getElementById('status-text').textContent = 'RUNNING';
+}
+
+// ── Controls ───────────────────────────────────────────────────────────────────
+document.getElementById('agents-range').addEventListener('input', function() {
+  document.getElementById('agents-val').textContent = this.value;
+});
+
+document.querySelectorAll('.algo-btn').forEach(btn => {
+  btn.addEventListener('click', function() {
+    document.querySelectorAll('.algo-btn').forEach(b => b.classList.remove('active'));
+    this.classList.add('active');
+    selectedAlgo = this.dataset.algo;
+  });
+});
+
+document.getElementById('preset-select').addEventListener('change', async function() {
+  const seed = parseInt(document.getElementById('seed-input').value)||42;
+  await loadGraph(this.value, seed);
+});
+
+document.getElementById('run-btn').addEventListener('click', async () => {
+  if (searchRunning || !ws || ws.readyState !== WebSocket.OPEN) return;
+  searchRunning = true;
+  logCount = 0;
+  visitedCount = 0;
+  document.getElementById('log-count').textContent = 0;
+  document.getElementById('log-scroll').innerHTML = '';
+  document.getElementById('tb-visited').textContent = 0;
+  document.getElementById('tb-frontier').textContent = 0;
+  document.getElementById('stat-visited').textContent = 0;
+  document.getElementById('stat-time').textContent = '—';
+  document.getElementById('stat-agents').textContent = '—';
+  document.getElementById('stat-status').textContent = '—';
+  document.getElementById('found-banner').style.display = 'none';
+  document.getElementById('run-btn').disabled = true;
+  setRunning();
+
+  const preset = document.getElementById('preset-select').value;
+  const seed   = parseInt(document.getElementById('seed-input').value)||42;
+  const numAgents = parseInt(document.getElementById('agents-range').value);
+  const target = document.getElementById('target-input').value || null;
+
+  buildAgentLegend(numAgents);
+  await loadGraph(preset, seed);
+  startTimer();
+
+  ws.send(JSON.stringify({
+    command: 'search',
+    preset, seed, num_agents: numAgents,
+    algorithm: selectedAlgo,
+    target: target ? parseInt(target) : null,
+  }));
+});
+
+document.getElementById('reset-btn').addEventListener('click', () => {
+  document.getElementById('log-scroll').innerHTML = '';
+  logCount = 0; visitedCount = 0;
+  document.getElementById('log-count').textContent = 0;
+  document.getElementById('tb-visited').textContent = 0;
+  document.getElementById('tb-frontier').textContent = 0;
+  document.getElementById('tb-elapsed').textContent = '0 ms';
+  document.getElementById('stat-visited').textContent = 0;
+  document.getElementById('stat-time').textContent = '—';
+  document.getElementById('stat-agents').textContent = '—';
+  document.getElementById('stat-status').textContent = '—';
+  document.getElementById('found-banner').style.display = 'none';
+  setIdle();
+  stopTimer();
+  const preset = document.getElementById('preset-select').value;
+  const seed = parseInt(document.getElementById('seed-input').value)||42;
+  loadGraph(preset, seed);
+});
+
+// ── Boot ───────────────────────────────────────────────────────────────────────
+(async () => {
+  await loadGraph('medium', 42);
+  connectWS();
+  buildAgentLegend(3);
+})();
+</script>
+</body>
+</html>
